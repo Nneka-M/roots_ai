@@ -1,0 +1,121 @@
+-- Get all ancestors (parents, grandparents, etc.)
+CREATE OR REPLACE FUNCTION get_ancestors(
+    p_person_id UUID,
+    p_max_depth INTEGER DEFAULT 10
+) RETURNS TABLE (
+    ancestor_id UUID,
+    ancestor_name VARCHAR,
+    relationship_path TEXT[],
+    depth INTEGER
+) AS $$
+WITH RECURSIVE ancestor_tree AS (
+    -- Base case: direct parents
+    SELECT 
+        r.to_person_id as parent_id,
+        p.name,
+        ARRAY[r.relationship_type]::TEXT[] as path,
+        1 as level
+    FROM relationships r
+    JOIN persons p ON r.to_person_id = p.id
+    WHERE r.from_person_id = p_person_id
+    AND r.relationship_type IN ('PARENT_OF', 'MOTHER_OF', 'FATHER_OF', 'STEP_FATHER_OF', 'STEP_MOTHER_OF')
+    
+    UNION ALL
+    
+    -- Recursive case: parents of parents
+    SELECT 
+        r.to_person_id,
+        p.name,
+        at.path || r.relationship_type,
+        at.level + 1
+    FROM relationships r
+    JOIN persons p ON r.to_person_id = p.id
+    JOIN ancestor_tree at ON r.from_person_id = at.parent_id
+    WHERE r.relationship_type IN ('PARENT_OF', 'MOTHER_OF', 'FATHER_OF', 'STEP_FATHER_OF', 'STEP_MOTHER_OF')
+    AND at.level < p_max_depth
+)
+SELECT parent_id, name, path, level FROM ancestor_tree;
+$$ LANGUAGE sql STABLE;
+
+-- Get all descendants (children, grandchildren, etc.)
+CREATE OR REPLACE FUNCTION get_descendants(
+    p_person_id UUID,
+    p_max_depth INTEGER DEFAULT 10
+) RETURNS TABLE (
+    descendant_id UUID,
+    descendant_name VARCHAR,
+    relationship_path TEXT[],
+    depth INTEGER
+) AS $$
+WITH RECURSIVE descendant_tree AS (
+    -- Base case: direct children
+    SELECT 
+        r.from_person_id as child_id,
+        p.name,
+        ARRAY[r.relationship_type]::TEXT[] as path,
+        1 as level
+    FROM relationships r
+    JOIN persons p ON r.from_person_id = p.id
+    WHERE r.to_person_id = p_person_id
+    AND r.relationship_type IN ('PARENT_OF', 'MOTHER_OF', 'FATHER_OF', 'STEP_FATHER_OF', 'STEP_MOTHER_OF')
+    
+    UNION ALL
+    
+    -- Recursive case: children of children
+    SELECT 
+        r.from_person_id,
+        p.name,
+        dt.path || r.relationship_type,
+        dt.level + 1
+    FROM relationships r
+    JOIN persons p ON r.from_person_id = p.id
+    JOIN descendant_tree dt ON r.to_person_id = dt.child_id
+    WHERE r.relationship_type IN ('PARENT_OF', 'MOTHER_OF', 'FATHER_OF')
+    AND dt.level < p_max_depth
+)
+SELECT child_id, name, path, level FROM descendant_tree;
+$$ LANGUAGE sql STABLE;
+
+-- Get immediate family (siblings, spouses, parents, children)
+CREATE OR REPLACE FUNCTION get_immediate_family(p_person_id UUID)
+RETURNS TABLE (
+    relative_id UUID,
+    relative_name VARCHAR,
+    relationship_type VARCHAR
+) AS $$
+-- Parents
+SELECT r.to_person_id, p.name, r.relationship_type
+FROM relationships r
+JOIN persons p ON r.to_person_id = p.id
+WHERE r.from_person_id = p_person_id
+AND r.relationship_type LIKE '%PARENT%'
+
+UNION ALL
+
+-- Children
+SELECT r.from_person_id, p.name, 'CHILD_OF'
+FROM relationships r
+JOIN persons p ON r.from_person_id = p.id
+WHERE r.to_person_id = p_person_id
+AND r.relationship_type LIKE '%PARENT%'
+
+UNION ALL
+
+-- Spouses
+SELECT r.to_person_id, p.name, r.relationship_type
+FROM relationships r
+JOIN persons p ON r.to_person_id = p.id
+WHERE r.from_person_id = p_person_id
+AND r.relationship_type LIKE 'SPOUSE%'
+
+UNION ALL
+
+-- Siblings (people with same parents)
+SELECT DISTINCT r2.from_person_id, p.name, 'SIBLING_OF'
+FROM relationships r1
+JOIN relationships r2 ON r1.to_person_id = r2.to_person_id
+JOIN persons p ON r2.from_person_id = p.id
+WHERE r1.from_person_id = p_person_id
+AND r1.relationship_type LIKE '%PARENT%'
+AND r2.from_person_id != p_person_id;
+$$ LANGUAGE sql STABLE;

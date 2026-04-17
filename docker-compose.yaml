@@ -1,0 +1,23 @@
+# docker-compose.yml
+version: '3.8'
+services:
+  postgres-age:
+    build: .
+    container_name: ancestry-db
+    environment:
+      POSTGRES_USER: nneka
+      POSTGRES_PASSWORD: 5432 
+      POSTGRES_DB: ancestry_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    command: >
+      postgres 
+      -c shared_preload_libraries='age,vector'
+      -c max_connections=200
+      -c shared_buffers=2GB
+      
+volumes:
+  postgres_data:
