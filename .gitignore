@@ -1,0 +1,152 @@
+# Virtual Environments
+ancestry_env/
+.venv/
+venv/
+env/
+ENV/
+.virtualenv
+virtualenv/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.egg-info
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+.vim/
+.emacs*
+
+# IDE specific
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
+*.code-workspace
+
+# JetBrains
+.idea/
+.idea_modules/
+*.iml
+*.iws
+*.ipr
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Logs
+logs/
+*.log
+*.log.*
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+postgres_data/
+databases/db_one.bak
+databases/db_two.bak
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Backups & Temporary Files
+*.bak
+*.backup
+*.tmp
+*.temp
+*.swp
+*~
+.~*
+
+# Node (if used)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Secrets & Credentials
+*.pem
+*.key
+*.pub
+secrets/
+credentials/
+
+# Testing
+.tox/
+.nox/
+.hypothesis/
+.pytest_cache/
+coverage.xml
+*.cover
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints
+
+# IPython
+.ipython_history
+
+# Misc
+.gitkeep
+*.orig
+*.rej
