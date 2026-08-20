@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Date, Boolean, Text, ForeignKey, ARRAY, JSON, func, text
+from sqlalchemy import create_engine, Column, String, Date, Boolean, Text, ForeignKey, ARRAY, JSON, func, text, Integer, DateTime
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 import uuid
@@ -94,6 +94,19 @@ def configure_relationships():
 # Configure relationships
 configure_relationships()
 
+class Migration(Base):
+    __tablename__ = "migrations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("uuid_generate_v4()"))
+    person_id = Column(UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"))
+
+    from_place = Column(String(255))
+    to_place = Column(String(255))
+    approx_date = Column(String(20))
+    notes = Column(Text)
+    sequence_order = Column(Integer)
+
+    created_at = Column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
 
 # Database connection
 DATABASE_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"

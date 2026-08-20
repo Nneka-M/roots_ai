@@ -30,6 +30,7 @@ from .confrmation import PendingProposal, is_confirmation, is_cancellation, buil
 from .handlers import commit_proposal
 from .query import get_all_family_data, find_person_by_name, handle_query, resolve_references
 from .narrative import generate_family_story as _generate_family_story
+from .transcription import transcribe_audio
 
 CREATE_ACTIONS = {"CREATE_PERSON", "CREATE_FAMILY_BATCH", "CREATE_RELATIONSHIP", "CREATE_EVENT"}
 
@@ -162,6 +163,50 @@ class AncestryAIEngine:
         """
         all_persons = get_all_family_data(user_id)
         return _generate_family_story(self.llm, user_id, person_id, all_persons, style, language)
+
+    # ─────────────────────────────────────────────
+    # INTERVIEW  (audio → transcript → extraction, non-destructive)
+    # ─────────────────────────────────────────────
+
+    def process_interview(self, user_id: uuid.UUID, audio_bytes: bytes,
+                          mime_type: str, language: str = "en") -> Dict:
+        """
+        Full interview pipeline: audio → transcript → extraction → entity
+        resolution. Writes nothing to the DB — returns a PendingProposal
+        (or None if nothing was extracted) so the caller can drop it straight
+        into pending_confirmations and let the existing /chat/ confirm/
+        correct/cancel flow handle the rest, unchanged.
+
+        Interview transcripts are free-form reminiscence, not a single
+        deliberate command — the extraction prompt's action classifier is
+        tuned for short chat messages ("Add my dad...", "Who is...") and
+        can't be trusted to pick a sensible action for a rambling life story.
+        We force CREATE_FAMILY_BATCH whenever anything was extracted, since
+        the point of an interview is always "capture everything mentioned,"
+        never a query or a story request.
+        """
+        transcript = transcribe_audio(self.llm, audio_bytes, mime_type)
+        extracted = self.extractor.extract_all_entities(transcript)
+
+        has_content = any(extracted.get(k) for k in ("persons", "relationships", "events", "migrations"))
+        if has_content:
+            extracted["action"] = "CREATE_FAMILY_BATCH"
+
+        extracted = resolve_references(user_id, extracted)
+
+        if has_content:
+            pending = PendingProposal(extracted, transcript, language)
+            message = build_confirmation_message(extracted)
+        else:
+            pending = None
+            message = "I transcribed the recording but couldn't identify any new family details to add."
+
+        return {
+            "transcript": transcript,
+            "pending": pending,
+            "confirmation_message": message,
+            "has_content": has_content
+        }
 
     # ─────────────────────────────────────────────
     # DELETE FAMILY TREE  (two-step: warn → confirm)

@@ -37,6 +37,14 @@ class FamilyTreeService:
         self.db.commit()
         return event
 
+    def create_migration(self, person_id: uuid.UUID, migration_data: dict):
+        """Create a migration/relocation record for a person"""
+        from database import Migration
+        migration = Migration(person_id=person_id, **migration_data)
+        self.db.add(migration)
+        self.db.commit()
+        return migration
+    
     def get_family_tree(self, person_id: uuid.UUID, depth: int = 2) -> Dict:
         """Get family tree using recursive SQL queries"""
         result = self.db.execute(

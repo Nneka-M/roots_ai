@@ -1,83 +1,85 @@
-# Ancestry MVP - Family Tree AI Engine
+# Roots — Backend Engineer Reference
 
-A modern family tree application with AI-powered natural language processing for building and managing African family histories. Built with FastAPI, PostgreSQL, and Google's Generative AI.
-
----
-
-## 📋 Project Overview
-
-**Roots** is an MVP ancestry management system that allows users to:
-- Add family members and relationships through natural language
-- Record life events (births, marriages, ceremonies, etc.)
-- Query family relationships
-- Generate family stories in various styles (griot, modern, children)
-- Leverage AI for semantic understanding and context
-
-The system uses **PostgreSQL** with **pgvector** for semantic embeddings and **Apache AGE** for graph queries, combined with **Google Generative AI** (Gemini) for intelligent processing.
+AI-powered African family history platform. Users describe their family in natural language; the AI extracts, proposes, and only writes to the database after explicit confirmation.
 
 ---
 
-## 📁 Project Structure & File Descriptions
+## Project Structure
 
-### Core Application Files
-
-| File | Purpose |
-|------|---------|
-| **api.py** | FastAPI application with REST endpoints. Main entry point for the application. Handles `/chat/`, `/story/`, and `/family-tree/` endpoints. Routes all user interactions through the AI engine. |
-| **ai_engine.py** | Core AI logic and NLP processing. Extracts entities (people, relationships, events) from natural language, classifies user intent (CREATE, QUERY, DELETE, STORY), and orchestrates database operations. Uses Gemini 2.5 Flash for LLM operations and embeddings. |
-| **graph_service.py** | Family tree service layer. Manages CRUD operations for persons, relationships, and events. Executes recursive SQL queries to fetch ancestors, descendants, and immediate family. Provides person context for LLM with relationship and event data. |
-| **database.py** | SQLAlchemy ORM models and database initialization. Defines `Person`, `Relationship`, and `Event` tables. Handles pgvector setup, connection pooling, and database migrations. |
-
-### Configuration & Dependency Files
-
-| File | Purpose |
-|------|---------|
-| **pyproject.toml** | Python project configuration (uv package manager). Specifies Python version (3.12+), project metadata, and dependencies. |
-| **requirements.txt** | Python package dependencies. Includes FastAPI, SQLAlchemy, LangChain, Google Generative AI, pgvector, PostgreSQL driver, and utilities. |
-| **dockerfile** | Docker image for PostgreSQL with pgvector and Apache AGE extensions. Sets up the database container with necessary build dependencies and configurations. |
-| **docker-compose.yaml** | Orchestration file for running PostgreSQL database service. Configures environment, ports, volumes, and PostgreSQL parameters for the application. |
-| **.env** | Environment variables (local - not in repo). Must contain: `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `GEMINI_API_KEY`. |
-
-### Database Schema Files
-
-| File | Purpose |
-|------|---------|
-| **databases/db_one** | PostgreSQL initialization script. Creates `persons`, `relationships`, `events`, and `audit_logs` tables with appropriate indexes, constraints, and extensions (uuid, vector). |
-| **databases/db_two** | PostgreSQL stored procedures for graph traversal. Contains functions: `get_ancestors()`, `get_descendants()`, `get_immediate_family()` for recursive family tree queries. |
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **Python 3.12+** (check with `python --version`)
-- **PostgreSQL 16** (via Docker or local installation)
-- **Google Generative AI API key** (from [Google AI Studio](https://aistudio.google.com))
-- **Docker & Docker Compose** (optional, for containerized database)
-
-### 1. Environment Setup
-
-#### Clone the repository
-```bash
-cd c:\Users\nneka\Documents\roots
+```
+roots/
+├── api.py                  # FastAPI app — all endpoints, session management
+├── database.py             # SQLAlchemy models + DB init
+├── graph_service.py        # FamilyTreeService — all DB read/write operations
+├── app/
+│   ├── __init__.py
+│   ├── ai_engine.py        # Orchestrator — routes intents, owns LLM clients
+│   ├── extraction.py       # EntityExtractor — LLM in, structured dict out (no DB)
+│   ├── confrmation.py      # PendingProposal, confirmation/cancellation logic
+│   ├── handlers.py         # DB writers — called only after user confirms
+│   ├── query.py            # Read-only DB access + QUERY action handler
+│   └── narrative.py        # Context builders + story/biography generation
+├── databases/
+│   ├── db_one              # Schema: persons, relationships, events, migrations, audit_logs
+│   └── db_two              # Stored procedures: get_ancestors(), get_descendants(), get_immediate_family()
+├── dockerfile              # PostgreSQL 16 + pgvector
+├── docker-compose.yaml     # DB service — reads credentials from .env
+├── requirements.txt        # Pinned dependencies
+└── .env                    # Local secrets (not in repo)
 ```
 
-#### Activate the virtual environment
+---
+
+## Architecture
+
+```
+POST /chat/
+  └── api.py
+        ├── checks pending_confirmations[session_id]
+        └── ai_engine.process_query()
+              ├── [if PendingProposal pending]  → confirmation gate
+              │     ├── "yes"    → handlers.commit_proposal() → DB write
+              │     ├── "no"     → cancelled, nothing written
+              │     └── other    → re-extract as correction, new proposal
+              ├── [if AWAITING_DELETE_CONFIRM]  → delete confirmation gate
+              └── [fresh message]
+                    ├── extraction.extract_all_entities()   ← LLM call 1
+                    ├── query.resolve_references()          ← DB read (name matching)
+                    ├── CREATE_* → PendingProposal → confirmation message
+                    ├── STORY   → narrative.generate_family_story()  ← LLM call 2
+                    ├── DELETE_FAMILY → warning message
+                    └── QUERY   → query.handle_query()  ← LLM call 2
+```
+
+**Key design rule:** Nothing is written to the database until the user explicitly confirms. `extraction.py` and `confrmation.py` never touch the DB.
+
+---
+
+## Setup
+
+### Prerequisites
+- Python 3.12+
+- Docker + Docker Compose
+- Google AI Studio API key → [aistudio.google.com](https://aistudio.google.com)
+
+### 1. Clone and activate environment
+
 ```bash
-# On Windows PowerShell
+cd c:\Users\nneka\Documents\roots
+
+# Windows PowerShell
 & .\ancestry_env\Scripts\Activate.ps1
 
-# On Windows CMD
+# Windows CMD
 .\ancestry_env\Scripts\activate.bat
 
-# On macOS/Linux
+# macOS/Linux
 source ancestry_env/bin/activate
 ```
 
-#### Create `.env` file
-```bash
-# Create .env file in project root with:
+### 2. Create `.env`
+
+```env
 DB_USER=nneka
 DB_PASSWORD=your_secure_password
 DB_HOST=localhost
@@ -86,370 +88,250 @@ DB_NAME=ancestry_mvp
 GEMINI_API_KEY=your_google_api_key
 ```
 
-### 2. Database Setup
+> `GEMINI_API_KEY` — not `GOOGLE_API_KEY`. The AI engine reads this key.
 
-#### Option A: Using Docker (Recommended)
+### 3. Start the database
+
 ```bash
-# Build and start PostgreSQL with pgvector and Apache AGE
 docker-compose up -d
 
-# Verify the container is running
+# Verify
 docker ps | grep ancestry-db
+docker logs ancestry-db
 ```
 
-#### Option B: Local PostgreSQL Installation
-If using a local PostgreSQL instance:
-1. Create the database: `createdb ancestry_mvp`
-2. Install pgvector extension: `CREATE EXTENSION vector;`
-3. Run the schema scripts in order:
-   ```sql
-   -- In PostgreSQL psql:
-   \i databases/db_one    -- Creates tables
-   \i databases/db_two    -- Creates stored procedures
-   ```
-
-### 3. Install Python Dependencies
+### 4. Install dependencies
 
 ```bash
-# Using pip
 pip install -r requirements.txt
-
-# Or using uv (faster)
-uv pip install -r requirements.txt
 ```
 
-### 4. Initialize Database
+### 5. Initialise the database
 
 ```bash
-# This will create tables and enable extensions
 python database.py
 ```
 
 Expected output:
 ```
 Connecting to: postgresql://nneka:****@localhost:5432/ancestry_mvp
-✅ pgvector extension enabled
+✅ Database connection successful!
 Creating tables...
 ✅ Tables created successfully!
-✅ Database connection successful!
 ```
 
-### 5. Run the API Server
+Then run the schema scripts to create stored procedures:
 
 ```bash
-# Start FastAPI development server
-python api.py
+# Connect to the DB and run in order:
+psql -U nneka -d ancestry_mvp -f databases/db_one
+psql -U nneka -d ancestry_mvp -f databases/db_two
+```
 
-# Or using uvicorn directly
+### 6. Run the API
+
+```bash
+python api.py
+# or
 uvicorn api:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Server runs at: **http://localhost:8000**
+API available at: **http://localhost:8000**  
+Interactive docs: **http://localhost:8000/docs**
 
 ---
 
-## 📡 API Endpoints
+## API Endpoints
 
-### Main Endpoints
+### `POST /session/`
+Creates a session. Returns a `session_id` UUID that scopes all data for that user.  
+Pass this in every `/chat/` and `/story/` request body.
 
-#### 1. **POST /chat/** - Universal Chat Endpoint
-Main conversational interface for all user interactions.
-
-**Request:**
 ```json
+// Response
+{ "session_id": "uuid-string" }
+```
+
+> Sessions are in-memory. They do not survive a server restart. See **Known Limitations** below.
+
+---
+
+### `POST /chat/`
+
+```json
+// Request
 {
-  "text": "Add my grandfather Adewale, born 1920, Yoruba from Ibadan",
+  "session_id": "uuid-string",
+  "text": "My dad is Emmanuel Maduike from Nkwerre, Imo",
+  "language": "en"
+}
+
+// Response
+{
+  "response": "Here's what I found — please check it before I save anything:\n\n👤 Emmanuel Maduike (new)\n...\n\nReply yes to save this, or tell me what to correct.",
+  "action": "AWAITING_CREATE_CONFIRM",
   "language": "en"
 }
 ```
 
-**Response:**
+**Action values:**
+
+| action | Meaning |
+|--------|---------|
+| `AWAITING_CREATE_CONFIRM` | Proposal shown, awaiting yes/no/correction |
+| `CREATE_FAMILY_BATCH` | People (+ relationships + events) saved |
+| `CREATE_RELATIONSHIP` | Relationship saved |
+| `CREATE_EVENT` | Event saved |
+| `CREATE_CANCELLED` | User cancelled, nothing written |
+| `AWAITING_DELETE_CONFIRM` | Delete warning shown |
+| `DELETE_COMPLETE` | Entire tree deleted |
+| `DELETE_CANCELLED` | Delete cancelled |
+| `QUERY` | Question answered |
+| `STORY` | Story generated |
+| `ERROR` | Unhandled exception |
+
+**Confirmation:** reply `"yes"` (or: confirm, yep, sure, looks good) to commit.  
+**Cancellation:** reply `"no"` (or: cancel, stop, nevermind) to discard.  
+**Correction:** any other reply re-extracts with the original text + correction combined.  
+**Delete confirmation:** must be exactly `"YES, DELETE EVERYTHING"` (case-insensitive).
+
+---
+
+### `POST /story/`
+
 ```json
+// Request
 {
-  "response": "✅ Created: Adewale (born 1920)",
-  "action": "CREATE_PERSON",
-  "language": "en",
-  "created_names": ["Adewale"]
-}
-```
-
-**Supported Actions:**
-- `CREATE_PERSON` - Add a new family member
-- `CREATE_RELATIONSHIP` - Define relationships between people
-- `CREATE_EVENT` - Record life events
-- `CREATE_FAMILY_BATCH` - Add multiple people at once
-- `QUERY` - Ask questions about family
-- `STORY` - Request family stories
-- `DELETE_FAMILY` - Delete entire family tree (requires confirmation)
-
-#### 2. **POST /story/** - Direct Story Generation
-Generate stories for a known person by ID.
-
-**Request:**
-```json
-{
-  "person_id": "12345678-1234-1234-1234-123456789abc",
+  "session_id": "uuid-string",
+  "person_id": "uuid-string",
   "style": "griot",
   "language": "en"
 }
+
+// Response
+{ "story": "In the time of our ancestors...", "style": "griot" }
 ```
 
-**Response:**
+Styles: `griot` | `modern` | `children`
+
+---
+
+### `GET /family-tree/{person_id}?depth=2`
+
 ```json
 {
-  "story": "In the time of our ancestors...",
-  "style": "griot"
+  "person": { "id": "...", "name": "Emmanuel", "tribe": "Igbo", "town": "Nkwerre" },
+  "relatives": [{ "id": "...", "name": "Tunde", "relationship": "CHILD_OF" }],
+  "total_relatives": 1
 }
 ```
 
-**Styles:** `griot`, `modern`, `children`
+`depth` range: 1–5 (default 2).
 
-#### 3. **GET /family-tree/{person_id}** - Get Family Tree
-Retrieve family tree structure around a person.
+---
 
-**Query Parameters:**
-- `depth` (optional, default: 2) - Generations to retrieve (1-5)
+### `GET /health`
 
-**Response:**
 ```json
-{
-  "person": {
-    "id": "...",
-    "name": "Adewale",
-    "tribe": "Yoruba",
-    "town": "Ibadan"
-  },
-  "relatives": [
-    {
-      "id": "...",
-      "name": "Tunde",
-      "relationship": "CHILD_OF"
-    }
-  ],
-  "total_relatives": 5
-}
-```
-
-#### 4. **GET /health** - Health Check
-```bash
-curl http://localhost:8000/health
+{ "status": "healthy", "database": "connected" }
 ```
 
 ---
 
-## 🎯 Usage Examples
+## Database Schema
 
-### Example 1: Add a Person
-```bash
-curl -X POST http://localhost:8000/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Add my grandmother, Iya Funmilayo, she was born in 1945 in Abeokuta"}'
+### Tables
+
+| Table | Purpose |
+|-------|---------|
+| `persons` | Family members with cultural context and pgvector embedding |
+| `relationships` | Directed edges: `PARENT_OF`, `SPOUSE_OF`, `SIBLING_OF` |
+| `events` | Life events per person (birth, death, marriage, graduation, etc.) |
+| `migrations` | Movement/relocation history extracted from narrative |
+| `audit_logs` | Change log (CREATE/UPDATE/DELETE per entity) |
+
+### Key columns — persons
+
+```sql
+id UUID, user_id UUID,
+name, native_name, birth_date, death_date, gender,
+tribe, clan, village_origin, town, state, country,
+occupation TEXT[], titles TEXT[], languages TEXT[],
+biography TEXT, embedding VECTOR(768)
 ```
 
-### Example 2: Create Relationships
-```bash
-curl -X POST http://localhost:8000/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Adewale is the father of Tunde"}'
-```
+### Stored procedures (db_two)
 
-### Example 3: Record Events
-```bash
-curl -X POST http://localhost:8000/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Tunde graduated from University of Lagos in 1985"}'
-```
-
-### Example 4: Query Family
-```bash
-curl -X POST http://localhost:8000/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Who is Tunde'\''s father?"}'
-```
-
-### Example 5: Generate Story
-```bash
-curl -X POST http://localhost:8000/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Tell me the story of Adewale as a griot"}'
-```
+| Function | Returns |
+|----------|---------|
+| `get_ancestors(person_id, max_depth)` | Recursive ancestor chain |
+| `get_descendants(person_id, max_depth)` | Recursive descendant chain |
+| `get_immediate_family(person_id)` | Parents, children, spouses, siblings |
 
 ---
 
-## 🔧 Development & Integration
+## Module Responsibilities
 
-### Database Schema
-
-#### Persons Table
-Stores family members with cultural context and AI embeddings.
-
-```sql
-persons (
-  id UUID PRIMARY KEY,
-  user_id UUID,
-  name VARCHAR(255),
-  native_name VARCHAR(255),
-  birth_date DATE,
-  death_date DATE,
-  tribe VARCHAR(50),
-  clan VARCHAR(100),
-  village_origin VARCHAR(100),
-  town VARCHAR(100),
-  state VARCHAR(100),
-  country VARCHAR(100),
-  occupation TEXT[],
-  titles TEXT[],
-  biography TEXT,
-  embedding VECTOR(768)
-)
-```
-
-#### Relationships Table
-Defines connections between people.
-
-```sql
-relationships (
-  id UUID PRIMARY KEY,
-  from_person_id UUID REFERENCES persons(id),
-  to_person_id UUID REFERENCES persons(id),
-  relationship_type VARCHAR(50),  -- PARENT_OF, SPOUSE_OF, SIBLING_OF, etc.
-  is_traditional BOOLEAN,
-  start_date DATE,
-  end_date DATE
-)
-```
-
-#### Events Table
-Records life events for individuals.
-
-```sql
-events (
-  id UUID PRIMARY KEY,
-  person_id UUID REFERENCES persons(id),
-  event_type VARCHAR(50),  -- BIRTH, DEATH, MARRIAGE, NAMING_CEREMONY, etc.
-  event_date DATE,
-  location VARCHAR(255),
-  description TEXT,
-  cultural_significance TEXT
-)
-```
-
-### Key Technologies
-
-- **Framework:** FastAPI (async web framework)
-- **Database:** PostgreSQL 16 with pgvector (vector embeddings)
-- **ORM:** SQLAlchemy
-- **AI:** Google Generative AI (Gemini 2.5 Flash)
-- **Embeddings:** Google Generative AI Embeddings (768-dim)
-- **Graph Queries:** PostgreSQL recursive CTEs
-- **Vector Search:** pgvector with cosine distance
+| Module | Reads DB | Writes DB | LLM calls |
+|--------|----------|-----------|-----------|
+| `extraction.py` | ✗ | ✗ | ✅ (extract_all_entities) |
+| `confrmation.py` | ✗ | ✗ | ✗ |
+| `query.py` | ✅ | ✗ | ✅ (handle_query) |
+| `handlers.py` | ✅ | ✅ | ✗ |
+| `narrative.py` | ✗ | ✗ | ✅ (generate_family_story) |
+| `ai_engine.py` | ✅ (delete only) | ✅ (delete only) | ✗ (delegates) |
+| `graph_service.py` | ✅ | ✅ | ✗ |
 
 ---
 
-## 🐛 Troubleshooting
+## Environment Variables
 
-### Issue: "Connection refused" to database
-**Solution:** Ensure PostgreSQL is running:
+| Variable | Description |
+|----------|-------------|
+| `DB_USER` | PostgreSQL username |
+| `DB_PASSWORD` | PostgreSQL password |
+| `DB_HOST` | Database host (`localhost` when using Docker) |
+| `DB_PORT` | Database port (default `5432`) |
+| `DB_NAME` | Database name (`ancestry_mvp`) |
+| `GEMINI_API_KEY` | Google Generative AI key — **not** `GOOGLE_API_KEY` |
+
+---
+
+## Known Limitations (MVP)
+
+**In-memory sessions and pending confirmations** — both `active_sessions` and `pending_confirmations` in `api.py` are plain Python dicts. They are lost on server restart and will not work correctly across multiple uvicorn workers.
+
+Before scaling beyond a single dev instance:
+- Move sessions to Redis (short TTL) or a `sessions` DB table
+- Move pending confirmations to the same Redis/DB store
+- Add a TTL so stale proposals expire automatically
+
+**No authentication** — the `session_id` UUID is the only identity. Anyone with a session UUID can read and write that tree. Real auth (JWT, OAuth) should replace the session seam in `api.py._resolve_user_id()` — everything downstream already takes a `user_id` UUID and will not need to change.
+
+**`shared_buffers=256MB`** — the docker-compose default is conservative. Increase to 25% of available RAM for any non-laptop deployment.
+
+---
+
+## Troubleshooting
+
+**`ModuleNotFoundError: No module named 'extraction'`**  
+All imports inside `app/` must be relative (`from .extraction import ...`). Bare imports only work when running from inside the package directory.
+
+**`Connection refused` to database**  
 ```bash
-# Check if Docker container is running
-docker ps | grep ancestry-db
-
-# If not running, start it
 docker-compose up -d
+docker logs ancestry-db
 ```
 
-### Issue: "pgvector extension not found"
-**Solution:** The extension needs to be created:
+**`pgvector extension not found`**  
 ```bash
 python database.py
 ```
 
-### Issue: "GEMINI_API_KEY not set"
-**Solution:** Ensure `.env` file exists with valid API key:
+**`GEMINI_API_KEY not set`**  
+Check `.env` — the key name is `GEMINI_API_KEY`, not `GOOGLE_API_KEY`.
+
+**Stored procedures missing (`get_immediate_family does not exist`)**  
 ```bash
-cat .env  # Check contents
-# Add GEMINI_API_KEY=your_key if missing
+psql -U nneka -d ancestry_mvp -f databases/db_two
 ```
-
-### Issue: "ModuleNotFoundError: No module named 'langchain'"
-**Solution:** Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## 📝 Environment Variables Reference
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `DB_USER` | PostgreSQL username | `nneka` |
-| `DB_PASSWORD` | PostgreSQL password | `secure_password` |
-| `DB_HOST` | Database host | `localhost` or `postgres-age` |
-| `DB_PORT` | Database port | `5432` |
-| `DB_NAME` | Database name | `ancestry_mvp` |
-| `GEMINI_API_KEY` | Google Generative AI API key | `your-api-key-here` |
-
----
-
-## 🔌 For Developers
-
-### Adding New Relationship Types
-Edit `relationship_type` validation in `ai_engine.py` extraction prompts and add to `db_one` schema constraints.
-
-### Adding New Event Types
-Extend the event types in:
-1. `database.py` Event model
-2. `ai_engine.py` extraction prompt
-3. `graph_service.py` event handling
-
-### Customizing AI Behavior
-Modify the system prompts in `ai_engine.py`:
-- `_extract_all_entities()` - Entity extraction logic
-- `_handle_query()` - Query response generation
-- `generate_family_story()` - Story generation style
-
----
-
-## 📦 Dependencies Summary
-
-**Core:**
-- fastapi, uvicorn (API)
-- sqlalchemy, psycopg2-binary (Database)
-- pgvector (Vector embeddings)
-- python-dotenv (Environment)
-
-**AI:**
-- langchain, langchain-google-genai (LLM orchestration)
-- google-generativeai (Gemini API)
-
-**Utilities:**
-- pydantic (Data validation)
-- httpx (HTTP client)
-
----
-
-## 🎓 Example Integration Flow
-
-1. **User Input** → `/chat/` endpoint
-2. **AI Processing** → `ai_engine.process_query()` extracts entities & intent
-3. **Data Storage** → `graph_service` creates persons, relationships, events in DB
-4. **Embeddings** → Person context embedded with Google Embeddings
-5. **Response** → LLM generates human-friendly response
-6. **Output** → User receives confirmation or result
-
----
-
-## 📄 License
-
-This is a private MVP project.
-
----
-
-## 🤝 Support
-
-For integration questions or bugs, refer to:
-- **API Issues:** Check `api.py` and FastAPI logs
-- **Database Issues:** Check PostgreSQL logs in Docker: `docker logs ancestry-db`
-- **AI Issues:** Check GEMINI_API_KEY and rate limits
-- **Entity Extraction:** Review `_extract_all_entities()` logic in `ai_engine.py`

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional
 import uuid
@@ -54,6 +54,19 @@ except Exception as e:
 # find nothing pending. Fine for solo-dev MVP; flag to backend eng to move
 # this to Redis (short TTL) or a DB table before running >1 worker.
 pending_confirmations: dict = {}
+
+# In-memory job tracker for interview processing, keyed by a fresh interview_id.
+# Same in-memory caveat as everything else in this file. Values:
+#   {"status": "processing"}
+#   {"status": "ready", "transcript": ..., "confirmation_message": ..., "has_content": bool}
+#   {"status": "error", "error": "..."}
+#
+# NOTE: audio bytes themselves are NOT persisted anywhere right now — they're
+# read into memory, sent to Gemini for transcription, and discarded. Once
+# object storage (S3/R2/etc.) is wired up on the fullstack side, this
+# endpoint should persist the file there before/alongside processing rather
+# than only ever holding it transiently in a worker process.
+interview_jobs: dict = {}
 
 class SessionResponse(BaseModel):
     session_id: str
@@ -191,6 +204,91 @@ async def generate_story(request: StoryRequest):
         return {"story": story, "style": request.style}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _run_interview_pipeline(interview_id: str, user_id: uuid.UUID, session_id: str,
+                            person_id: str, audio_bytes: bytes, mime_type: str, language: str):
+    """
+    Runs off the request thread via BackgroundTasks — transcription +
+    extraction can take well over the length of a normal request for
+    anything but a short clip. Writes its result into interview_jobs for
+    GET /interview/{interview_id} to poll, and — if anything was extracted —
+    drops the resulting PendingProposal into pending_confirmations exactly
+    as /chat/ would, so confirming/correcting it afterward is just a normal
+    /chat/ call with "yes" or a correction. No new confirmation logic needed.
+    """
+    try:
+        result = ai_engine.process_interview(user_id, audio_bytes, mime_type, language)
+
+        if result["pending"]:
+            pending_confirmations[session_id] = result["pending"]
+
+        interview_jobs[interview_id] = {
+            "status": "ready",
+            "person_id": person_id,
+            "transcript": result["transcript"],
+            "confirmation_message": result["confirmation_message"],
+            "has_content": result["has_content"],
+            "next_step": (
+                "Reply via POST /chat/ with this session_id and 'yes' to save, "
+                "or tell me what to correct."
+            ) if result["has_content"] else None
+        }
+    except Exception as e:
+        interview_jobs[interview_id] = {"status": "error", "person_id": person_id, "error": str(e)}
+
+
+@app.post("/person/{person_id}/interview")
+async def upload_interview(
+    background_tasks: BackgroundTasks,
+    person_id: str,
+    session_id: str = Form(...),
+    language: str = Form("en"),
+    audio: UploadFile = File(...),
+):
+    """
+    Upload an audio recording (an oral-history interview, a voice note) for
+    transcription and extraction. Processing happens in the background —
+    this returns immediately with an interview_id to poll via
+    GET /interview/{interview_id}.
+
+    person_id anchors who this interview is primarily about (for future
+    biography generation grounded in the transcript) — it doesn't restrict
+    what extraction can find. If the recording mentions other relatives,
+    they're extracted the same as anything from a /chat/ message.
+
+    Supported audio: wav, mp3, aiff, aac, ogg, flac.
+    """
+    if not ai_engine:
+        raise HTTPException(status_code=503, detail="AI engine not available")
+
+    user_id = _resolve_user_id(session_id)
+
+    audio_bytes = await audio.read()
+    mime_type = audio.content_type or "audio/mpeg"
+
+    interview_id = str(uuid.uuid4())
+    interview_jobs[interview_id] = {"status": "processing", "person_id": person_id}
+
+    background_tasks.add_task(
+        _run_interview_pipeline,
+        interview_id, user_id, session_id, person_id, audio_bytes, mime_type, language
+    )
+
+    return {"interview_id": interview_id, "status": "processing"}
+
+
+@app.get("/interview/{interview_id}")
+async def get_interview_status(interview_id: str):
+    """
+    Poll for interview processing status. Once status is "ready", the
+    transcript and confirmation_message are included — reply via /chat/
+    with the same session_id to confirm, correct, or cancel what was found.
+    """
+    job = interview_jobs.get(interview_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Unknown interview_id")
+    return job
 
 
 @app.get("/family-tree/{person_id}")
